@@ -27,8 +27,8 @@ flowchart LR
   G -- other paths --> F[static files<br/>shop-web build]
 ```
 
-**In scope:** register, login, refresh, logout, me; an Ed25519 JWT key with JWKS; per-IP and per-account rate limits; the reverse proxy; static files with the SPA fallback; combined access log; a token command for the demo; tests; CI.
-**Out of scope:** OAuth providers, email verification, 2FA, password reset, key rotation, refresh-token reuse detection.
+**In scope:** register, login, refresh, logout, me; an Ed25519 JWT key with JWKS; per-IP and per-account rate limits; the reverse proxy; static files with the SPA fallback; combined access log; a token command for the demo; tests.
+**Out of scope:** OAuth providers, email verification, 2FA, password reset, key rotation, refresh-token reuse detection, GitHub Actions CI (postponed for now to save Actions minutes).
 
 **Principles**
 
@@ -49,7 +49,7 @@ auth-gateway/
   internal/httpx/              JSON errors, request ids
   migrations/                  goose SQL migrations (schema `auth`)
   AGENTS.md                    conventions, the JWT contract with shop-api
-  Dockerfile, Makefile, .golangci.yml, .github/workflows/ci.yml
+  Dockerfile, Makefile, .golangci.yml
 ```
 
 ## Data
@@ -116,11 +116,11 @@ shop-api's shopper drives these: its `brute` incident (wrong passwords from one 
 | Debug mode, PII | two medium findings with one-line fixes, good for showing "report only" versus "open a ticket" settings |
 | Guard | while fixing GW-3, Muse is not allowed to read secrets or push; agnts's guard vetoes it through Muse's approvals and the ticket log shows the veto |
 
-## Tests and CI
+## Tests
 
 - Unit: password hashing and verification, JWT issue/verify, refresh rotation, limiter buckets, client IP resolution, the SPA fallback rules.
 - HTTP tests with `httptest`: register → login → me → refresh → logout; 429 on the per-email lockout. GW-1, GW-3 and GW-5's cases are the ones missing.
-- CI: `go vet`, `golangci-lint`, `go test -race ./...` with a Postgres service, `docker build`.
+- Checks run locally for now, by hand or through the Makefile before merging: `go vet`, `golangci-lint`, `go test -race ./...` with `TEST_DATABASE_URL` set, `docker build`. No GitHub Actions workflow.
 
 ## Deploy
 
@@ -128,7 +128,7 @@ Built from `/opt/shop/src/auth-gateway`, compose service **`auth-gateway`** in s
 
 ## Phases
 
-1. Schema, register/login/refresh/logout/me, key and JWKS, tests, CI.
+1. Schema, register/login/refresh/logout/me, key and JWKS, tests.
 2. Proxy, access log, rate limits, client IP, static files with the SPA fallback, `token` command.
 3. Bugs GW-1 to GW-5, deploy behind `shop.agnts.uz`, log watcher mapping, a dry run of the brute-force and `.env` scenarios.
 
