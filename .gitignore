@@ -1,0 +1,14 @@
+# build output
+/bin/
+/auth-gateway
+*.test
+*.out
+
+# local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# editors
+.idea/
+.vscode/
