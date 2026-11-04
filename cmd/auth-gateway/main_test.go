@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/abdusalomovrustambek/auth-gateway/internal/testutil"
+	"github.com/abdusalomovrustambek/auth-gateway/internal/token"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
@@ -168,6 +171,64 @@ func TestRouterWiring(t *testing.T) {
 	pool.Close()
 	if rec := get("/healthz", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("/healthz with the database gone: status %d, want 503", rec.Code)
+	}
+}
+
+func TestLoginPerIPLimit(t *testing.T) {
+	// No database: the router is built with a nil pool and an in-memory
+	// key, and malformed bodies fail binding with 400 before any handler
+	// can touch the pool. Every attempt still passes the real limiter
+	// chain from newRouter, spending a per-IP token without tripping the
+	// per-email lockout.
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate test key: %v", err)
+	}
+	upstream, err := url.Parse("http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	router, err := newRouter(routerDeps{
+		cfg:       config{AssetsDir: t.TempDir(), TrustedProxies: "10.0.0.0/8"},
+		pool:      nil,
+		key:       &token.Key{KID: "test-kid", Private: priv, Public: pub},
+		upstream:  upstream,
+		log:       slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		accessLog: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("newRouter: %v", err)
+	}
+
+	post := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`nope`))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	for i := range 10 {
+		if rec := post("/auth/login"); rec.Code != http.StatusBadRequest {
+			t.Fatalf("login attempt %d: status %d, want 400", i+1, rec.Code)
+		}
+	}
+	if rec := post("/auth/login"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("11th login attempt: status %d, want 429 (per-IP login limit)", rec.Code)
+	} else if rec.Header().Get("Retry-After") == "" {
+		t.Error("login 429 has no Retry-After header")
+	}
+
+	// The register limiter next door keeps its own budget.
+	for i := range 5 {
+		if rec := post("/auth/register"); rec.Code != http.StatusBadRequest {
+			t.Fatalf("register attempt %d: status %d, want 400", i+1, rec.Code)
+		}
+	}
+	if rec := post("/auth/register"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("6th register attempt: status %d, want 429 (per-IP register limit)", rec.Code)
+	} else if rec.Header().Get("Retry-After") == "" {
+		t.Error("register 429 has no Retry-After header")
 	}
 }
 

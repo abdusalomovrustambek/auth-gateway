@@ -207,7 +207,7 @@ func newRouter(d routerDeps) (*gin.Engine, error) {
 		httpx.RequestID(),
 		edge.ClientIP(edge.ParseTrusted(d.cfg.TrustedProxies)),
 		edge.AccessLog(d.accessLog),
-		limit.OnPath("/auth/login/", loginLimit),
+		limit.OnPath("/auth/login", loginLimit),
 		limit.OnPath("/auth/register", registerLimit),
 		globalLimit,
 	)
