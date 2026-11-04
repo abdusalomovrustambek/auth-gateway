@@ -56,19 +56,6 @@ func upstream(t *testing.T) (*httptest.Server, func() seen) {
 	}
 }
 
-// closeNotifyRecorder is an httptest.ResponseRecorder that also implements
-// http.CloseNotifier, which the stdlib ReverseProxy requires of the writer.
-type closeNotifyRecorder struct {
-	*httptest.ResponseRecorder
-	closed chan bool
-}
-
-func (w *closeNotifyRecorder) CloseNotify() <-chan bool { return w.closed }
-
-func newRecorder() *closeNotifyRecorder {
-	return &closeNotifyRecorder{ResponseRecorder: httptest.NewRecorder(), closed: make(chan bool)}
-}
-
 func proxyRouter(t *testing.T, target string, logs io.Writer) *gin.Engine {
 	t.Helper()
 	u, err := url.Parse(target)
@@ -104,7 +91,7 @@ func TestProxyForwardsWithHeaders(t *testing.T) {
 			if tt.xff != "" {
 				req.Header.Set("X-Forwarded-For", tt.xff)
 			}
-			rec := newRecorder()
+			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, req)
 			got := last()
 
@@ -133,7 +120,7 @@ func TestProxyMakesRequestID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/ping", nil)
 	req.RemoteAddr = "198.51.100.9:5555"
-	rec := newRecorder()
+	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	got := last()
 
@@ -146,7 +133,7 @@ func TestProxyKeepsPrefixUnderUpstreamBasePath(t *testing.T) {
 	srv, last := upstream(t)
 	r := proxyRouter(t, srv.URL+"/v1", io.Discard)
 
-	r.ServeHTTP(newRecorder(), httptest.NewRequest(http.MethodGet, "/api/orders", nil))
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/orders", nil))
 	got := last()
 	if got.uri != "/v1/api/orders" {
 		t.Errorf("upstream saw %q, want /v1/api/orders", got.uri)
@@ -163,7 +150,7 @@ func TestProxyUpstreamDownGives502(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/products", nil)
 	req.Header.Set("X-Request-ID", "req-99")
-	rec := newRecorder()
+	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadGateway {
