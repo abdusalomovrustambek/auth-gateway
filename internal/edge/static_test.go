@@ -15,6 +15,7 @@ const (
 	htmlAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 	indexBody  = "<html>shop</html>"
 	secretBody = "outside-the-root"
+	dotBody    = "DATABASE_URL=postgres://secret\n"
 )
 
 func writeFile(t *testing.T, name, body string) {
@@ -34,6 +35,8 @@ func staticRouter(t *testing.T) *gin.Engine {
 	writeFile(t, filepath.Join(root, "index.html"), indexBody)
 	writeFile(t, filepath.Join(root, "assets", "app.js"), "console.log(1)")
 	writeFile(t, filepath.Join(root, "robots.txt"), "User-agent: *")
+	writeFile(t, filepath.Join(root, ".env"), dotBody)
+	writeFile(t, filepath.Join(root, ".git", "config"), "[core]")
 	writeFile(t, filepath.Join(tmp, "secret.txt"), secretBody)
 
 	r := gin.New()
@@ -71,6 +74,12 @@ func TestStatic(t *testing.T) {
 		{"traversal", http.MethodGet, "/../secret.txt", "*/*", http.StatusNotFound, ""},
 		{"traversal encoded", http.MethodGet, "/%2e%2e/secret.txt", "*/*", http.StatusNotFound, ""},
 		{"traversal in the middle", http.MethodGet, "/assets/../../secret.txt", "*/*", http.StatusNotFound, ""},
+		{"dotfile", http.MethodGet, "/.env", "*/*", http.StatusNotFound, ""},
+		{"dotfile with html accept", http.MethodGet, "/.env", htmlAccept, http.StatusNotFound, ""},
+		{"head dotfile", http.MethodHead, "/.env", "*/*", http.StatusNotFound, ""},
+		{"dot directory file", http.MethodGet, "/.git/config", "*/*", http.StatusNotFound, ""},
+		{"traversal to dotfile", http.MethodGet, "/assets/../.env", "*/*", http.StatusNotFound, ""},
+		{"encoded dotfile", http.MethodGet, "/%2Eenv", "*/*", http.StatusNotFound, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,6 +98,9 @@ func TestStatic(t *testing.T) {
 			}
 			if strings.Contains(rec.Body.String(), secretBody) {
 				t.Error("response leaked a file outside the root")
+			}
+			if strings.Contains(rec.Body.String(), dotBody) {
+				t.Error("response leaked a dotfile under the root")
 			}
 		})
 	}
@@ -115,6 +127,27 @@ func TestStaticHeadAndContentType(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
 		t.Errorf("js Content-Type = %q", ct)
+	}
+}
+
+func TestStaticExplicitRouteWinsOverDotGuard(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, ".well-known", "x"), "dot file must not serve")
+
+	r := gin.New()
+	r.GET("/.well-known/jwks.json", func(c *gin.Context) { c.String(http.StatusOK, "jwks") })
+	r.NoRoute(Static(root))
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "jwks" {
+		t.Errorf("explicit dot route: status %d, body %q, want 200 %q", rec.Code, rec.Body, "jwks")
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/x", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("static dot path: status %d, want 404", rec.Code)
 	}
 }
 
