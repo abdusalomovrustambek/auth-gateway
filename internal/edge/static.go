@@ -20,6 +20,7 @@ import (
 //   - everything else is 404.
 //
 // Paths are cleaned as rooted paths, so ".." cannot leave root.
+// Dotfiles and dot-directories are never served.
 func Static(root string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
@@ -27,6 +28,12 @@ func Static(root string) gin.HandlerFunc {
 			return
 		}
 		rel := path.Clean("/" + c.Request.URL.Path)
+		for _, seg := range strings.Split(rel, "/") {
+			if len(seg) > 1 && seg[0] == '.' {
+				httpx.Error(c, http.StatusNotFound, "not found")
+				return
+			}
+		}
 		if file := regularFile(filepath.Join(root, filepath.FromSlash(rel))); file != "" {
 			serveFile(c, file, false)
 			return
